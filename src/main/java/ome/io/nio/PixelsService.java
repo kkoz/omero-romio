@@ -210,6 +210,7 @@ public class PixelsService extends AbstractFileSystemService
             FilePathResolver resolver, BackOff backOff, TileSizes sizes, IQuery iQuery)
     {
         super(path, isReadOnlyRepo);
+        log.info("In PixelsService constructor");
         this.resolver = resolver;
         this.backOff = backOff;
         this.sizes = sizes;
@@ -284,6 +285,7 @@ public class PixelsService extends AbstractFileSystemService
 	 * backing file.
 	 */
 	public PixelBuffer createPixelBuffer(Pixels pixels) throws IOException {
+	    log.info("In createPixelBuffer");
 		RomioPixelBuffer pixbuf = new RomioPixelBuffer(getPixelsPath(pixels
 				.getId()), pixels, true);
 		initPixelBuffer(pixbuf);
@@ -299,12 +301,15 @@ public class PixelsService extends AbstractFileSystemService
      */
     public StatsInfo[] makePyramid(Pixels pixels)
     {
+        log.info("In CUSTOM makePyramid");
+        /*
         String type = pixels.getPixelsType().getValue();
         if ("float".equals(type) || "double".equals(type)) {
             log.debug("Pyramid creation disabled for floating point"
                     + " pixel data");
             return null;
         }
+        */
         final String pixelsFilePath = getPixelsPath(pixels.getId());
         final File pixelsFile = new File(pixelsFilePath);
         final String pixelsPyramidFilePath = pixelsFilePath + PYRAMID_SUFFIX;
@@ -358,12 +363,43 @@ public class PixelsService extends AbstractFileSystemService
             }
         }
 
+        //If the image has pyramid data (multiple resolution levels)
+        //Then we just check whether statsinfo is there
+        int series = getSeries(pixels);
+        PixelBuffer bfPixelBuffer = createBfPixelBuffer(
+                originalFilePath, series);
+        if (bfPixelBuffer.getResolutionLevels() > 1) {
+            log.info("Resolution levels: " + Integer.toString(bfPixelBuffer.getResolutionLevels()));
+            boolean statsInfoMissing = true;
+            for (int channel = 0; channel < pixels.sizeOfChannels(); channel++)
+            {
+                if (pixels.getChannel(channel).getStatsInfo() != null)
+                {
+                    statsInfoMissing = false;
+                    break;
+                }
+            }
+            if (statsInfoMissing) {
+                log.info("StatsInfo is missing");
+                PixelsPyramidMinMaxStore minMaxStore = calculateMinMax(pixels,
+                        pixelsFile, pixelsFilePath, originalFilePath);
+                if (minMaxStore != null) {
+                    return minMaxStore.createStatsInfo();
+                }
+                return null;
+            }
+        }
+
+        String type = pixels.getPixelsType().getValue();
+        if ("float".equals(type) || "double".equals(type)) {
+            log.info("Exit early for floating point pixel types");
+            return null;
+        }
         final BfPyramidPixelBuffer pixelsPyramid = createPyramidPixelBuffer(
                 pixels, pixelsPyramidFilePath, true);
 
         try
         {
-
             // If we don't have any data to properly generate the pyramid
             // we close the instance which will save an empty (and therefore
             // corrupt) pyramid. This is intentional since further calls will
@@ -406,13 +442,14 @@ public class PixelsService extends AbstractFileSystemService
             final Pixels pixels,final File pixelsPyramidFile,
             final BfPyramidPixelBuffer pixelsPyramid, final File pixelsFile,
             final String pixelsFilePath, final String originalFilePath) {
-
+        log.info("In performWrite");
         final PixelBuffer source;
         final Dimension tileSize;
         final PixelsPyramidMinMaxStore minMaxStore;
 
         if (pixelsFile.exists())
         {
+            log.info("pixelsFile exists");
             minMaxStore = null;
             source = createRomioPixelBuffer(pixelsFilePath, pixels, false);
             // FIXME: This should be configuration or service driven
@@ -422,6 +459,7 @@ public class PixelsService extends AbstractFileSystemService
         }
         else
         {
+            log.info("pixelsFile does not exist");
             minMaxStore = new PixelsPyramidMinMaxStore(pixels.getSizeC());
             int series = getSeries(pixels);
             BfPixelBuffer bfPixelBuffer = createMinMaxBfPixelBuffer(
@@ -539,6 +577,130 @@ public class PixelsService extends AbstractFileSystemService
         return minMaxStore;
     }
 
+    private PixelsPyramidMinMaxStore calculateMinMax(
+            final Pixels pixels, final File pixelsFile,
+            final String pixelsFilePath, final String originalFilePath) {
+        log.info("In calculateMinMax");
+        final PixelBuffer source;
+        final Dimension tileSize;
+        final PixelsPyramidMinMaxStore minMaxStore;
+
+        if (pixelsFile.exists())
+        {
+            log.info("pixelsFile exists");
+            minMaxStore = null;
+            source = createRomioPixelBuffer(pixelsFilePath, pixels, false);
+            // FIXME: This should be configuration or service driven
+            // FIXME: Also implemented in RenderingBean.getTileSize()
+            tileSize = new Dimension(Math.min(pixels.getSizeX(), sizes.getTileWidth()),
+                                     Math.min(pixels.getSizeY(), sizes.getTileHeight()));
+        }
+        else
+        {
+            log.info("pixelsFile does not exist");
+            minMaxStore = new PixelsPyramidMinMaxStore(pixels.getSizeC());
+            int series = getSeries(pixels);
+            BfPixelBuffer bfPixelBuffer = createMinMaxBfPixelBuffer(
+                    originalFilePath, series, minMaxStore);
+            source = bfPixelBuffer;
+            // If the tile sizes we've been given are completely ridiculous
+            // then reset them to WIDTHxHEIGHT. Currently these conditions are:
+            //  * TileWidth == ImageWidth
+            //  * TileHeight == ImageHeight
+            //  * Smallest tile dimension divided by the largest resolution
+            //    level factor is < 1.
+            // -- Chris Allan (ome:#5224).
+            final Dimension sourceTileSize = source.getTileSize();
+            final double tileWidth = sourceTileSize.getWidth();
+            final double tileHeight = sourceTileSize.getHeight();
+            final boolean tileDimensionTooSmall;
+            double factor = Math.pow(2, 5);
+            if (((tileWidth / factor) < 1.0)
+                || ((tileHeight / factor) < 1.0))
+            {
+                tileDimensionTooSmall = true;
+            }
+            else
+            {
+                tileDimensionTooSmall = false;
+            }
+            if (tileWidth == source.getSizeX()
+                || tileHeight == source.getSizeY()
+                || tileDimensionTooSmall)
+            {
+                tileSize = new Dimension(Math.min(pixels.getSizeX(), sizes.getTileWidth()),
+                                         Math.min(pixels.getSizeY(), sizes.getTileHeight()));
+            }
+            else
+            {
+                tileSize = sourceTileSize;
+            }
+            log.info("Calculated tile size: " + tileSize.toString());
+        }
+        log.info("Destination pyramid tile size: " + tileSize);
+
+        try
+        {
+            final double totalTiles =
+                source.getSizeZ() * source.getSizeC() * source.getSizeT() *
+                (Math.ceil(source.getSizeX() / tileSize.getWidth())) *
+                (Math.ceil(source.getSizeY() / tileSize.getHeight()));
+            final int tenPercent = Math.max((int) totalTiles / 10, 1);
+            Utils.forEachTile(new TileLoopIteration() {
+                public void run(int z, int c, int t, int x, int y, int w,
+                            int h, int tileCount) throws FailedTileLoopException
+            {
+                if (log.isInfoEnabled()
+                    && tileCount % tenPercent == 0)
+                {
+                    log.info(String.format(
+                            "MinMax calculation for Pixels:%d %d/%d (%d%%).",
+                            pixels.getId(), tileCount + 1, (int) totalTiles,
+                            (int) (tileCount / totalTiles * 100)));
+                }
+                try
+                {
+                    Timer.Context ctx = tileTimes == null ? null : tileTimes.time();
+                    try {
+                        PixelData tile = source.getTile(z, c, t, x, y, w, h);
+                        tile.dispose();
+                    } finally {
+                        if (ctx != null) {
+                            ctx.stop();
+                        }
+                    }
+                }
+                catch (IOException e1)
+                {
+                    throw new FailedTileLoopException();
+                }
+            }
+            }, source, (int) tileSize.getWidth(), (int) tileSize.getHeight());
+
+            log.info("SUCCESS -- MinMax calculated for pixels id:" + pixels.getId());
+
+        } catch (FailedTileLoopException ftle) {
+            log.error("Failed: completed tile count = " + ftle.getTileCount());
+        }
+
+        finally
+        {
+            if (source != null)
+            {
+                try
+                {
+                    source.close();
+                }
+                catch (IOException e)
+                {
+                    log.error("Error closing pixel pyramid.", e);
+                }
+            }
+        }
+        log.info(minMaxStore.toString());
+        return minMaxStore;
+    }
+
     /**
      * Returns a pixel buffer for a given set of pixels. Either a proprietary
      * ROMIO pixel buffer or a specific pixel buffer implementation.
@@ -568,6 +730,7 @@ public class PixelsService extends AbstractFileSystemService
      */
     public PixelBuffer getPixelBuffer(Pixels pixels, boolean write)
     {
+        log.info("In getPixelBuffer");
         PixelBuffer pb = _getPixelBuffer(pixels, write);
         if (log.isDebugEnabled()) {
             log.debug(pb +" for " + pixels);
@@ -577,6 +740,7 @@ public class PixelsService extends AbstractFileSystemService
 
     public PixelBuffer _getPixelBuffer(Pixels pixels, boolean write)
     {
+        log.info("In CUSTOM _getPixelBuffer");
         final String originalFilePath = getOriginalFilePath(pixels);
         final boolean requirePyramid = requiresPixelsPyramid(pixels);
         final String pixelsFilePath = getPixelsPath(pixels.getId());
@@ -584,6 +748,9 @@ public class PixelsService extends AbstractFileSystemService
         final String pixelsPyramidFilePath = pixelsFilePath + PYRAMID_SUFFIX;
         final File pixelsPyramidFile = new File(pixelsPyramidFilePath);
         final boolean pixelsFileExists = pixelsFile.exists();
+        log.info("requiresPyramid is: " + Boolean.toString(requirePyramid));
+        log.info("SizeX:" + pixels.getSizeX().toString());
+        log.info("SizeY:" + pixels.getSizeY().toString());
 
         //
         // 1. If the pixels file exists, then we know that this isn't
@@ -598,6 +765,7 @@ public class PixelsService extends AbstractFileSystemService
         //
         if ((pixelsFileExists || originalFilePath != null) && requirePyramid)
         {
+            log.info("In scenario 1");
             while (!pixelsPyramidFile.exists()) {
                 // If we are in OMERO.fs mode and the source original file
                 // is already a pyramid don't try and create one.
@@ -605,7 +773,10 @@ public class PixelsService extends AbstractFileSystemService
                     int series = getSeries(pixels);
                     PixelBuffer bfPixelBuffer = createBfPixelBuffer(
                             originalFilePath, series);
+                    log.info("Resolution Levels: " + Integer.toString(bfPixelBuffer.getResolutionLevels()));
                     if (bfPixelBuffer.getResolutionLevels() > 1) {
+                        log.info("Resolution Levels > 1");
+                        handleMissingStatsInfo(pixels);
                         return bfPixelBuffer;
                     }
                 }
@@ -626,6 +797,7 @@ public class PixelsService extends AbstractFileSystemService
         //
         if (pixelsPyramidFile.exists())
         {
+            log.info("In scenario 2");
             log.info("Using Pyramid BfPixelBuffer: " + pixelsPyramidFilePath);
             return createPyramidPixelBuffer(pixels, pixelsPyramidFilePath, write);
         }
@@ -638,12 +810,15 @@ public class PixelsService extends AbstractFileSystemService
         // RomioPixelBuffer and return.
         if (!pixelsFileExists)
         {
+            log.info("In scenario 3");
             if (requirePyramid) {
                 if (!write) {
                     throw new LockTimeout(
                             "Pixels pyramid missing, being created or " +
                             "import in progress.", 15*1000, 0);
                 }
+                //If we have a pyramid, but are missing StatsInfo, we need to create it
+                handleMissingStatsInfo(pixels);
                 log.info("Creating Pyramid BfPixelBuffer: " +
                         pixelsPyramidFilePath);
                 return createPyramidPixelBuffer(pixels, pixelsPyramidFilePath, write);
@@ -676,6 +851,7 @@ public class PixelsService extends AbstractFileSystemService
      *         otherwise
      */
     public boolean requiresPixelsPyramid(Pixels pixels) {
+        log.info("In requiresPixelsPyramid");
         if (sizes.getMaxPlaneFloatOverride()) {
             String type = pixels.getPixelsType().getValue();
             if ("float".equals(type) || "double".equals(type))
@@ -695,6 +871,7 @@ public class PixelsService extends AbstractFileSystemService
      */
     protected String getOriginalFilePath(Pixels pixels)
     {
+        log.info("In getOriginalFilePath");
         if (resolver == null)
         {
             return null;
@@ -710,6 +887,7 @@ public class PixelsService extends AbstractFileSystemService
      */
     protected int getSeries(Pixels pixels)
     {
+        log.info("In getSeries");
         try
         {
             final String query = "SELECT image.series FROM Pixels WHERE id = :id";
@@ -729,6 +907,7 @@ public class PixelsService extends AbstractFileSystemService
 	 * @throws IOException If there is an I/O error during initialization.
 	 */
 	private void initPixelBuffer(RomioPixelBuffer pixbuf) throws IOException {
+	    log.info("In initPixelBuffer");
 		String path = getPixelsPath(pixbuf.getId());
 		createSubpath(path);
         Integer size = RomioPixelBuffer.safeLongToInteger(pixbuf.getPlaneSize());
@@ -765,6 +944,7 @@ public class PixelsService extends AbstractFileSystemService
      * @param pixels
      */
     protected void handleMissingStatsInfo(Pixels pixels) {
+        log.info("in handleMissingStatsInfo");
         for (int channel = 0; channel < pixels.sizeOfChannels(); channel++)
         {
             if (pixels.getChannel(channel).getStatsInfo() != null)
@@ -796,6 +976,7 @@ public class PixelsService extends AbstractFileSystemService
 	 * @throws MissingPyramidException
 	 */
     protected void handleMissingPyramid(Pixels pixels, String pixelsPyramidFilePath) {
+        log.info("in handleMissingPyramid");
         if (!isReadOnlyRepo) {
             final MissingPyramidMessage mpm = new MissingPyramidMessage(this, pixels.getId());
             pub.publishEvent(mpm);
@@ -821,6 +1002,7 @@ public class PixelsService extends AbstractFileSystemService
                                                       final int series,
                                                       final IMinMaxStore store)
     {
+        log.info("In createMinMaxBfPixelBuffer");
         try
         {
             IFormatReader reader = createBfReader();
@@ -849,6 +1031,7 @@ public class PixelsService extends AbstractFileSystemService
      * @throws IOException
      */
     public IFormatReader getBfReader(Pixels pixels) throws FormatException, IOException {
+        log.info("In getBfReader");
         // from getPixelBuffer
         final String originalFilePath = getOriginalFilePath(pixels);
         final int series = getSeries(pixels);
@@ -863,6 +1046,7 @@ public class PixelsService extends AbstractFileSystemService
      * instances and {@link IFormatReader#setFlattenedResolutions(boolean)} set to false.
      */
     protected IFormatReader createBfReader() {
+        log.info("In createBfReader");
         IFormatReader reader = new ImageReader() {
             @Override
             public void setId(String id) throws FormatException, IOException {
@@ -891,6 +1075,7 @@ public class PixelsService extends AbstractFileSystemService
      */
     protected BfPixelBuffer createBfPixelBuffer(final String filePath,
                                               final int series) {
+        log.info("In createBfPixelBuffer");
         try
         {
             IFormatReader reader = createBfReader();
@@ -916,7 +1101,7 @@ public class PixelsService extends AbstractFileSystemService
      */
     protected BfPyramidPixelBuffer createPyramidPixelBuffer(final Pixels pixels,
             final String filePath, boolean write) {
-
+        log.info("In createPyramidPixelBuffer");
         try
         {
             if (write) {
@@ -945,6 +1130,7 @@ public class PixelsService extends AbstractFileSystemService
      */
     protected PixelBuffer createRomioPixelBuffer(String pixelsFilePath,
         Pixels pixels, boolean allowModification) {
+        log.info("In createRomioPixelBuffer");
         return new RomioPixelBuffer(pixelsFilePath, pixels, allowModification);
     }
 
@@ -956,6 +1142,7 @@ public class PixelsService extends AbstractFileSystemService
 	 * @throws ResourceError If deletion fails.
 	 */
 	public void removePixels(List<Long> pixelIds) {
+	    log.info("In removePixels");
 		File file;
 		String fileName;
 		boolean success = false;
@@ -998,12 +1185,14 @@ public class PixelsService extends AbstractFileSystemService
         public void setChannelGlobalMinMax(int channel, double minimum,
                                            double maximum, int series)
         {
+            log.info("In setChannelGlobalMinMax");
             channelGlobalMinMax[channel][0] = minimum;
             channelGlobalMinMax[channel][1] = maximum;
         }
 
         public StatsInfo[] createStatsInfo()
         {
+            log.info("In createStatsInfo");
             StatsInfo[] statsInfo = new StatsInfo[sizeC];
             for (int c = 0; c < sizeC; c++)
             {
