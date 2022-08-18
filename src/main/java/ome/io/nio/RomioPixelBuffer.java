@@ -22,6 +22,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 
 import ome.conditions.ApiUsageException;
 import ome.model.core.Pixels;
@@ -1046,6 +1047,12 @@ public class RomioPixelBuffer extends AbstractBuffer implements PixelBuffer {
             throw new DimensionsOutOfBoundsException(
                     "Invalid step size: steps sizes must be 1 or greater");
         }
+    }
+
+    @Override
+    public Map<Integer, double[]> findMinMax(int[] channels) {
+        // TODO Auto-generated method stub
+        return null;
     }
 
 }

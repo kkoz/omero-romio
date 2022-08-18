@@ -17,6 +17,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 
 import ome.model.core.Pixels;
 import ome.util.PixelData;
@@ -487,5 +488,11 @@ public class InMemoryPlanarPixelBuffer implements PixelBuffer
     {
         throw new UnsupportedOperationException(
                 "Cannot set resolution levels on an in memory pixel buffer.");
+    }
+
+    @Override
+    public Map<Integer, double[]> findMinMax(int[] channels) {
+        // TODO Auto-generated method stub
+        return null;
     }
 }

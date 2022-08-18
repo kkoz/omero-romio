@@ -15,6 +15,7 @@ import java.nio.ByteOrder;
 import java.nio.channels.FileLock;
 import java.nio.channels.OverlappingFileLockException;
 import java.util.List;
+import java.util.Map;
 
 import loci.formats.FormatException;
 import loci.formats.FormatTools;
@@ -1246,5 +1247,11 @@ public class BfPyramidPixelBuffer implements PixelBuffer {
             throw new ApiUsageException("In write mode!");
         }
         delegate().setResolutionLevel(resolutionLevel);
+    }
+
+    @Override
+    public Map<Integer, double[]> findMinMax(int[] channels) {
+        // TODO Auto-generated method stub
+        return null;
     }
 }

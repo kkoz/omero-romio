@@ -14,6 +14,7 @@ import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import loci.formats.CoreMetadata;
@@ -593,6 +594,12 @@ public class BfPixelBuffer implements PixelBuffer, Serializable {
         // The highest resolution level (100%) is actually the first series
         bfReader.setResolution(Math.abs(
                 resolutionLevel - (getResolutionLevels() - 1)));
+    }
+
+    @Override
+    public Map<Integer, double[]> findMinMax(int[] channels) {
+        // TODO Auto-generated method stub
+        return null;
     }
 
 }

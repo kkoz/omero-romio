@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
 import java.util.List;
+import java.util.Map;
 
 import ome.util.PixelData;
 
@@ -713,4 +714,6 @@ public interface PixelBuffer extends Closeable
      *
      */
     public List<List<Integer>> getResolutionDescriptions();
+
+    public Map<Integer, double[]> findMinMax(int[] channels);
 }
