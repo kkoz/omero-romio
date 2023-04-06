@@ -275,6 +275,14 @@ public class PixelsService extends AbstractFileSystemService
         }
     }
 
+    /**
+     * Getter for the TileSizes
+     * @return The TileSizes
+     */
+    public TileSizes getTileSizes() {
+        return sizes;
+    }
+
 	/**
 	 * Creates a PixelBuffer for a given pixels set.
 	 *
